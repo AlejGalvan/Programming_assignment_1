@@ -7,7 +7,7 @@
 | Team Member Names | Email |
 |---|---|
 | Alejandro Galvan | alejandrogalvan@csu.fullerton.edu |
-|---|---|
+|Mohammad Ali Khan|malikhan2597@csu.fullerton.edu|
 |---|---|
 |---|---|
 
