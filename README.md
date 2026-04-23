@@ -34,20 +34,57 @@ How to Execute the Program
    python cli.py ecs.fullerton.edu 1234
 
 Supported Commands
-- ls
-- get <filename>
-- put <filename>
-- quit
+- ls -> List files on the server
+- get <filename> -> Download a file from the server
+- put <filename> -> Upload a file to the server
+- quit -> Close the connection
+
+Directory Structure
+This implementation uses separate directories for client and server fiels to prevent overwrite conflicts:
+- Client files are stored in:
+  client_files/
+- Server files are stored in:
+  server_files/
+
+How It Works
+- put <filename> -> Uploads a file from `client_files/` to `server_files/`
+- get <filename> -> Downloads a file from `server_files/` to `client_files/`
+- ls -> Displays contents of `server_files/`
+
+File Safety Features
+To prevent accidental overwrites and improve security:
+- The client will not overwrite existing local files during `get`
+- The server will not overwrite remote files during `put`
+- Invalid filenames and directory traversal attemps (e.g., `../file.txt`) are rejected
+
+Connection Design
+This program uses two TCP connections:
+1. Control Connection
+   - Persistent connection for commands (`ls`, `get`, `put`, `quit`)
+   - Remains open for the duration of the session
+2. Data Connection
+   - Created separately for each `ls`, `get`, and `put` command
+   - The client:
+        - Opens an ephemeral port
+        - Sends the port number to the server using the `PORT` command
+   - The server:
+        - Connects back to the client on that port
+        - Transfers data (file contents or directory listing)
+    
+Implementation Notes
+- Uses helper functions to ensure reliable transmission:
+    - `send_all()` ensures all bytes are sent
+    - `recv_exact()` ensures exact number of bytes are received
+- File transfers unclude:
+    - Sending the file size first
+    - Then sending the file data
+- Partial transfers are handled safely:
+    - Incomplete files are deleted if an error occuers during transfer
 
 Submission Notes
-- This program uses two TCP connections:
-  1. A control connection that stays open for the full FTP session.
-  2. A separate data connection created for each ls, get, and put command.
-- The client opens an ephemeral port for the data connection and informs the server of the port number.
-- The server connects back to the client on that port for each transfer.
-- The server and client use helper functions to ensure all bytes are sent and received correctly.
-- Files should be submitted inside one uniquely named directory as required by the assignment.
-Note: When testing the program locally, running both the client and server in the same directory may cause file overwrite conflicts during `get` and `put` operations. This happens because both programs access the same file paths. To properly test file transfers, it is recommended to run the client and server from separate working directories.
+- Submit all files inside on uniquely named directory as required
+- Ensure both `server.py` and `client.py` are included
+- Ensure `client_files/` and `server_files/` are created automatically when running the programs
 
 
 ---
