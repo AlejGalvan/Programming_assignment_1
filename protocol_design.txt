@@ -1,0 +1,122 @@
+Protocol Design for Simplified FTP Application
+
+Overview
+This project implements a simplified FTP client and server using TCP sockets. The application uses two different TCP connections during a session:
+
+1. Control Connection
+   - Established when the client first connects to the server.
+   - Remains open for the full session.
+   - Used for commands and status/error messages.
+
+2. Data Connection
+   - Created separately for each ls, get, and put command.
+   - Used only for transferring directory listings or file data.
+   - Closed immediately after each transfer is complete.
+
+This design follows the assignment requirement that the control channel lasts for the entire session, while a separate data channel is established and torn down for each transfer.
+
+Message Format
+All control messages are line-based ASCII/UTF-8 text ending with a newline character.
+
+Client-to-Server Control Messages
+- LS
+  Requests a directory listing from the server.
+
+- GET <filename>
+  Requests a file download from the server.
+
+- PUT <filename> <filesize>
+  Requests permission to upload a file to the server. The client includes the        file size so the server knows how many bytes to receive.
+
+- PORT <portnumber>
+  Sent after the server approves LS, GET, or PUT. This tells the server which ephemeral port on the client to connect to for the data transfer.
+
+- QUIT
+  Ends the FTP session.
+
+Server-to-Client Control Responses
+- OK
+  The server accepted the command.
+
+- READY
+  The server is ready for the data transfer.
+
+- DONE
+  The transfer completed successfully.
+
+- ERROR <message>
+  The request failed. Examples include invalid command, invalid file size, invalid port number, or file not found.
+
+Protocol Flow
+
+1. ls Command
+   a. Client sends:
+      LS
+   b. Server replies:
+      OK
+   c. Client creates an ephemeral listening port and sends:
+      PORT <portnumber>
+   d. Server connects to that client port and sends:
+      - One line containing the number of bytes in the listing
+      - The actual directory listing bytes
+   e. Server sends on control channel:
+      DONE
+
+2. get Command
+   a. Client sends:
+      GET <filename>
+   b. Server checks if the file exists.
+      - If not found, server replies:
+        ERROR File not found
+      - If found, server replies:
+        OK
+   c. Client creates an ephemeral listening port and sends:
+      PORT <portnumber>
+   d. Server connects to that client port and sends:
+      - One line containing the file size in bytes
+      - The actual file bytes
+   e. Server sends on control channel:
+      DONE
+   f. Client saves the received data into a local file with the same filename and prints the filename and number of bytes transferred.
+
+3. put Command
+   a. Client checks that the local file exists.
+   b. Client sends:
+      PUT <filename> <filesize>
+   c. Server replies:
+      OK
+   d. Client creates an ephemeral listening port and sends:
+      PORT <portnumber>
+   e. Server connects to that client port.
+   f. Client sends the file bytes over the data connection.
+   g. Server writes the received bytes into a file with the given filename.
+   h. Server sends on control channel:
+      DONE
+   i. Client prints the filename and number of bytes transferred.
+
+4. quit Command
+   a. Client sends:
+      QUIT
+   b. Server replies:
+      OK
+   c. Both sides close the control connection.
+
+How the Receiver Knows When to Stop Receiving
+For ls and get:
+- The sender first sends a line containing the exact byte count.
+- The receiver reads that size first, then continues receiving until exactly that many bytes have been collected.
+
+For put:
+- The client includes the file size in the PUT command.
+- The server reads exactly that many bytes from the data connection.
+
+How Buffer Problems Are Avoided
+The implementation uses helper functions that repeatedly call send() until all bytes are transmitted. It also uses exact-length receiving logic for data transfers so partial recv() calls do not lose data. This addresses the socket programming issue where send() and recv() are not guaranteed to process all bytes in one call.
+
+Summary
+The protocol is simple, reliable, and follows the project requirements:
+- persistent control channel
+- separate data channel per transfer
+- support for ls, get, put, and quit
+- byte-count-based transfer handling
+- clear success and error responses
