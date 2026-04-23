@@ -2,8 +2,27 @@ from socket import *
 import sys
 import os
 
-
 BUFFER_SIZE = 4096
+SERVER_DIR = "server_files"
+
+
+def ensure_server_dir() -> None:
+    os.makedirs(SERVER_DIR, exist_ok=True)
+
+
+def safe_filename(filename: str) -> str:
+    """
+    Restrict filenames to their basename so clients cannot use paths like:
+    ../secret.txt or subdir/file.txt
+    """
+    name = os.path.basename(filename)
+    if not name or name in (".", ".."):
+        raise ValueError("Invalid filename")
+    return name
+
+
+def server_path(filename: str) -> str:
+    return os.path.join(SERVER_DIR, safe_filename(filename))
 
 
 def send_all(sock, data: bytes) -> None:
@@ -48,7 +67,13 @@ def recv_line(sock) -> str:
 
 
 def get_directory_listing() -> bytes:
-    files = os.listdir(".")
+    files = []
+
+    for name in os.listdir(SERVER_DIR):
+        full_path = os.path.join(SERVER_DIR, name)
+        if os.path.isfile(full_path):
+            files.append(name)
+
     files.sort()
     listing = "\n".join(files)
     if listing:
@@ -78,14 +103,15 @@ def handle_ls(control_sock, client_ip: str, data_port: int) -> None:
 
 
 def handle_get(control_sock, client_ip: str, data_port: int, filename: str) -> None:
-    file_size = os.path.getsize(filename)
+    path = server_path(filename)
+    file_size = os.path.getsize(path)
     data_sock = connect_data_socket(client_ip, data_port)
 
     try:
         send_line(control_sock, "READY")
         send_line(data_sock, str(file_size))
 
-        with open(filename, "rb") as f:
+        with open(path, "rb") as f:
             while True:
                 chunk = f.read(BUFFER_SIZE)
                 if not chunk:
@@ -99,12 +125,20 @@ def handle_get(control_sock, client_ip: str, data_port: int, filename: str) -> N
 
 
 def handle_put(control_sock, client_ip: str, data_port: int, filename: str, file_size: int) -> None:
+    path = server_path(filename)
+
+    # Prevent overwriting an existing server file
+    if os.path.exists(path):
+        send_line(control_sock, "ERROR Remote file already exists")
+        print(f"FAILURE: put {filename} (remote file already exists)")
+        return
+
     data_sock = connect_data_socket(client_ip, data_port)
 
     try:
         send_line(control_sock, "READY")
 
-        with open(filename, "wb") as f:
+        with open(path, "wb") as f:
             remaining = file_size
             while remaining > 0:
                 chunk = data_sock.recv(min(BUFFER_SIZE, remaining))
@@ -112,6 +146,11 @@ def handle_put(control_sock, client_ip: str, data_port: int, filename: str, file
                     raise RuntimeError("Client disconnected during file upload")
                 f.write(chunk)
                 remaining -= len(chunk)
+    except Exception:
+        # If transfer fails midway, remove incomplete file
+        if os.path.exists(path):
+            os.remove(path)
+        raise
     finally:
         data_sock.close()
 
@@ -143,9 +182,14 @@ def handle_client(control_sock, client_addr) -> None:
                     send_line(control_sock, "ERROR Usage: GET <filename>")
                     continue
 
-                filename = parts[1]
+                try:
+                    filename = safe_filename(parts[1])
+                    path = server_path(filename)
+                except ValueError:
+                    send_line(control_sock, "ERROR Invalid filename")
+                    continue
 
-                if not os.path.isfile(filename):
+                if not os.path.isfile(path):
                     print(f"FAILURE: get {filename} (file not found)")
                     send_line(control_sock, "ERROR File not found")
                     continue
@@ -158,7 +202,12 @@ def handle_client(control_sock, client_addr) -> None:
                     send_line(control_sock, "ERROR Usage: PUT <filename> <filesize>")
                     continue
 
-                filename = parts[1]
+                try:
+                    filename = safe_filename(parts[1])
+                except ValueError:
+                    send_line(control_sock, "ERROR Invalid filename")
+                    continue
+
                 try:
                     file_size = int(parts[2])
                     if file_size < 0:
@@ -223,7 +272,7 @@ def handle_client(control_sock, client_addr) -> None:
 
 def main():
     if len(sys.argv) != 2:
-        print("Usage: python serv.py <PORTNUMBER>")
+        print("Usage: python server.py <PORTNUMBER>")
         sys.exit(1)
 
     try:
@@ -232,11 +281,14 @@ def main():
         print("Port number must be an integer")
         sys.exit(1)
 
+    ensure_server_dir()
+
     server_socket = socket(AF_INET, SOCK_STREAM)
     server_socket.bind(("", server_port))
     server_socket.listen(1)
 
     print(f"FTP server listening on port {server_port}")
+    print(f"Serving files from: {os.path.abspath(SERVER_DIR)}")
 
     try:
         while True:

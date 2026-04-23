@@ -2,8 +2,26 @@ from socket import *
 import sys
 import os
 
-
 BUFFER_SIZE = 4096
+CLIENT_DIR = "client_files"
+
+
+def ensure_client_dir() -> None:
+    os.makedirs(CLIENT_DIR, exist_ok=True)
+
+
+def safe_filename(filename: str) -> str:
+    """
+    Restrict filenames to their basename so local files stay inside client_files.
+    """
+    name = os.path.basename(filename)
+    if not name or name in (".", ".."):
+        raise ValueError("Invalid filename")
+    return name
+
+
+def client_path(filename: str) -> str:
+    return os.path.join(CLIENT_DIR, safe_filename(filename))
 
 
 def send_all(sock, data: bytes) -> None:
@@ -49,7 +67,7 @@ def recv_line(sock) -> str:
 
 def create_data_listener():
     listener = socket(AF_INET, SOCK_STREAM)
-    listener.bind(("", 0))   # bind to ephemeral port
+    listener.bind(("", 0))  # ephemeral port
     listener.listen(1)
     port = listener.getsockname()[1]
     return listener, port
@@ -92,7 +110,19 @@ def do_ls(control_sock):
 
 
 def do_get(control_sock, filename: str):
-    send_line(control_sock, f"GET {filename}")
+    try:
+        safe_name = safe_filename(filename)
+        dest_path = client_path(safe_name)
+    except ValueError:
+        print("ERROR Invalid filename")
+        return
+
+    # Prevent overwriting an existing local client file
+    if os.path.exists(dest_path):
+        print("ERROR Local file already exists")
+        return
+
+    send_line(control_sock, f"GET {safe_name}")
     response = recv_line(control_sock)
 
     if not response.startswith("OK"):
@@ -114,34 +144,47 @@ def do_get(control_sock, filename: str):
         try:
             size_line = recv_line(data_sock)
             file_size = int(size_line)
-
             file_data = recv_exact(data_sock, file_size)
 
-            with open(filename, "wb") as f:
+            with open(dest_path, "wb") as f:
                 f.write(file_data)
 
+        except Exception:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            raise
         finally:
             data_sock.close()
 
         final_response = recv_line(control_sock)
         if not final_response.startswith("DONE"):
             print(final_response)
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
             return
 
-        print(f"{filename} {file_size} bytes transferred")
+        print(f"{safe_name} {file_size} bytes transferred")
+        print(f"Saved to: {dest_path}")
 
     finally:
         listener.close()
 
 
 def do_put(control_sock, filename: str):
-    if not os.path.isfile(filename):
-        print("ERROR Local file not found")
+    try:
+        safe_name = safe_filename(filename)
+        src_path = client_path(safe_name)
+    except ValueError:
+        print("ERROR Invalid filename")
         return
 
-    file_size = os.path.getsize(filename)
+    if not os.path.isfile(src_path):
+        print("ERROR Local file not found in client_files/")
+        return
 
-    send_line(control_sock, f"PUT {filename} {file_size}")
+    file_size = os.path.getsize(src_path)
+
+    send_line(control_sock, f"PUT {safe_name} {file_size}")
     response = recv_line(control_sock)
 
     if not response.startswith("OK"):
@@ -161,7 +204,7 @@ def do_put(control_sock, filename: str):
         data_sock, _ = listener.accept()
 
         try:
-            with open(filename, "rb") as f:
+            with open(src_path, "rb") as f:
                 while True:
                     chunk = f.read(BUFFER_SIZE)
                     if not chunk:
@@ -175,7 +218,7 @@ def do_put(control_sock, filename: str):
             print(final_response)
             return
 
-        print(f"{filename} {file_size} bytes transferred")
+        print(f"{safe_name} {file_size} bytes transferred")
 
     finally:
         listener.close()
@@ -183,7 +226,7 @@ def do_put(control_sock, filename: str):
 
 def main():
     if len(sys.argv) != 3:
-        print("Usage: python cli.py <server machine> <server port>")
+        print("Usage: python client.py <server machine> <server port>")
         sys.exit(1)
 
     server_name = sys.argv[1]
@@ -194,6 +237,8 @@ def main():
         print("Server port must be an integer")
         sys.exit(1)
 
+    ensure_client_dir()
+
     control_sock = socket(AF_INET, SOCK_STREAM)
 
     try:
@@ -201,6 +246,8 @@ def main():
     except Exception as e:
         print(f"Could not connect to server: {e}")
         sys.exit(1)
+
+    print(f"Local client directory: {os.path.abspath(CLIENT_DIR)}")
 
     try:
         while True:
