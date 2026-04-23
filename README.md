@@ -30,7 +30,7 @@ How to Execute the Program
    python cli.py <server machine> <server port>
 
    Examples:
-   python cli.py localhost 1234
+   python cli.py localhost 1234 /
    python cli.py ecs.fullerton.edu 1234
 
 Supported Commands
