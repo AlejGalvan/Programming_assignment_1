@@ -21,17 +21,17 @@ Instructions:
 How to Execute the Program
 
 1. Start the server:
-   python serv.py <PORTNUMBER>
+   python server.py <PORTNUMBER>
 
    Example:
-   python serv.py 1234
+   python server.py 1234
 
 2. Start the client:
-   python cli.py <server machine> <server port>
+   python client.py <server machine> <server port>
 
    Examples:
-   python cli.py localhost 1234 /
-   python cli.py ecs.fullerton.edu 1234
+   python client.py localhost 1234 /
+   python client.py ecs.fullerton.edu 1234
 
 Supported Commands
 - ls -> List files on the server
